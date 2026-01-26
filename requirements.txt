@@ -1,0 +1,16 @@
+# Core Dependencies
+flask>=2.0.0
+pywebview>=4.0.0
+pysrt>=4.0.0
+requests>=2.25.0
+
+# Platform-Specific Whisper Backends (one will be auto-selected)
+# macOS: whisper-mlx (auto-installed)
+# Windows: faster-whisper (recommended)
+# Linux: openai-whisper (fallback)
+faster-whisper>=1.0.0
+ctranslate2>=4.0.0  # Required for RTX 50xx series support
+
+# Optional: Install specific backend manually
+# pip install whisper-mlx  # For Apple Silicon
+# pip install openai-whisper  # For corporate networks

@@ -1,0 +1,11 @@
+# Chapter Generator - Build Dependencies
+# These are required for building the standalone executable
+
+# Core build tool
+pyinstaller>=5.0.0
+
+# GUI framework
+pywebview>=4.0.0
+
+# Optional: For better console output during build
+colorama>=0.4.0
