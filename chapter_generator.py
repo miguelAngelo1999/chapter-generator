@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import sys
+import os
+
 # CRITICAL: Prevent infinite process spawning in Windows executables
 import multiprocessing
 if __name__ == "__main__":
@@ -9,22 +12,36 @@ if __name__ == "__main__":
     except RuntimeError:
         pass
 
-import sys
+# Always set working directory to exe location so DLLs are found
+if getattr(sys, 'frozen', False):
+    os.chdir(os.path.dirname(sys.executable))
+
 import re
 import json
-import os
 import platform
 import tempfile
 import subprocess
 import math
 import logging
+
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 import glob
 from datetime import datetime
 
-# Setup logging to file
+# Setup logging to file in local location (avoid network paths in Parallels/VMs)
 if getattr(sys, 'frozen', False):
-    log_dir = os.path.dirname(sys.executable)
+    # Running as executable - use C:\ProgramData to avoid network-mapped user profiles
+    log_dir = os.path.join('C:\\ProgramData', 'ChapterGenerator')
+    os.makedirs(log_dir, exist_ok=True)
 else:
+    # Running as script - use script directory
     log_dir = os.path.dirname(__file__)
 
 log_file = os.path.join(log_dir, f'chapter_generator_{datetime.now().strftime("%Y%m%d")}.log')
@@ -90,8 +107,20 @@ else:
 os.environ['NO_PROXY'] = 'localhost,127.0.0.1'
 os.environ['no_proxy'] = 'localhost,127.0.0.1'
 
+OSAURUS_API_KEY = "osk-v1.eyJhdWQiOiIweDhmODIzMTUxOGJCYUU1MjQ3RURjNzkyYjY4QTg2OTFGYzlmREE5MjEiLCJjbnQiOjIsImV4cCI6MTgwOTU0NTMxNCwiaWF0IjoxNzc4MDA5MzE0LCJpc3MiOiIweDhmODIzMTUxOGJCYUU1MjQ3RURjNzkyYjY4QTg2OTFGYzlmREE5MjEiLCJsYmwiOiJDaGFwdGVycyIsIm5vbmNlIjoiMjk3MmMwYjUzMjFmNGVmZDljMzIwYmNmZDA4OTNkYzUifQ.2660dfda9cedb35409ff3ce3812dbad981a7d606b18dc3a77b8187132ce8562b257f243d61656c46c91ac463e0fa1dbe497057a0c0126004f0ef0af93dd6fc131c"
+
 # --- Configuration ---
-APP_VERSION = "1.0.0"
+def _read_installed_version():
+    try:
+        import json
+        vf = os.path.join(os.path.dirname(sys.executable) if getattr(sys,'frozen',False) else os.path.dirname(os.path.abspath(__file__)), 'version.json')
+        if os.path.exists(vf):
+            return json.loads(open(vf).read()).get('version', '1.1.2')
+    except Exception:
+        pass
+    return '1.1.3'
+
+APP_VERSION = _read_installed_version()
 DEBUG = '--debug' in sys.argv 
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_SWAMA_BASE_URL = "http://0.0.0.0:28100"
@@ -120,9 +149,11 @@ def load_html_template():
     """Load HTML template from separate file"""
     # Handle both script and executable modes
     if getattr(sys, 'frozen', False):
-        # Running as PyInstaller executable
-        base_path = sys._MEIPASS
-        template_path = os.path.join(base_path, 'templates', 'index.html')
+        # Use _internal/templates so patches can update without rebuilding exe
+        _internal = os.path.join(os.path.dirname(sys.executable), '_internal')
+        template_path = os.path.join(_internal, 'templates', 'index.html')
+        if not os.path.exists(template_path):
+            template_path = os.path.join(sys._MEIPASS, 'templates', 'index.html')
     else:
         # Running as script
         base_path = os.path.dirname(__file__)
@@ -185,6 +216,10 @@ class OllamaSession:
     def ask(self, prompt):
         import requests
         
+        headers = {}
+        if self.is_osaurus:
+            headers["Authorization"] = f"Bearer {OSAURUS_API_KEY}"
+        
         if self.is_osaurus:
             # Try Osaurus API format (similar to OpenAI)
             url = f"{self.base_url}/v1/chat/completions"
@@ -207,6 +242,8 @@ class OllamaSession:
         try:
             session = requests.Session()
             session.trust_env = False  # Disable proxy
+            if headers:
+                session.headers.update(headers)
             if platform.system() != "Windows":
                 session.verify = False
                 import urllib3
@@ -235,8 +272,13 @@ def extract_audio_from_video(video_path, output_audio_path):
     """Extract audio from video file using ffmpeg"""
     process = None
     try:
-        # Try different ffmpeg executable names based on platform
-        ffmpeg_cmd = 'ffmpeg.exe' if platform.system() == 'Windows' else 'ffmpeg'
+        # Use bundled ffmpeg from Purfview dir if available
+        if getattr(sys, 'frozen', False):
+            purfview_dir = os.path.join(os.path.dirname(sys.executable), "_internal", "Purfview-Whisper-Faster")
+        else:
+            purfview_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Purfview-Whisper-Faster")
+        bundled_ffmpeg = os.path.join(purfview_dir, "ffmpeg.exe")
+        ffmpeg_cmd = bundled_ffmpeg if os.path.exists(bundled_ffmpeg) else ('ffmpeg.exe' if platform.system() == 'Windows' else 'ffmpeg')
         cmd = [ffmpeg_cmd, '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', '-y', output_audio_path]
         if platform.system() == 'Windows':
             process = subprocess.run(cmd, check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -247,18 +289,8 @@ def extract_audio_from_video(video_path, output_audio_path):
         print(f"Error extracting audio: {e}")
         return False
     except FileNotFoundError:
-        # Try alternative ffmpeg command
-        try:
-            alt_cmd = 'ffmpeg' if platform.system() == 'Windows' else 'ffmpeg'
-            cmd = [alt_cmd, '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', '-y', output_audio_path]
-            if platform.system() == 'Windows':
-                process = subprocess.run(cmd, check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            else:
-                process = subprocess.run(cmd, check=True, capture_output=True)
-            return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            print("ffmpeg not found. Please install ffmpeg to process video files.")
-            return False
+        print(f"ffmpeg not found at: {ffmpeg_cmd}")
+        return False
     finally:
         # Clean up process handles if needed
         if process and hasattr(process, 'stdout') and process.stdout:
@@ -278,28 +310,16 @@ def transcribe_audio_to_srt(audio_path, model_size="medium"):
     """Transcribe audio using Purfview Whisper"""
     load_whisper_backends()
     
-    # Fix for PyInstaller - check _internal first, then exe directory
+    # Always use _internal directory in frozen mode
     if getattr(sys, 'frozen', False):
-        # Try _internal first (where COLLECT puts bundled data)
-        alt_paths = [
-            os.path.join(sys._MEIPASS, "Purfview-Whisper-Faster"),
-            os.path.join(os.path.dirname(sys.executable), "Purfview-Whisper-Faster"),
-        ]
+        purfview_whisper_dir = os.path.join(os.path.dirname(sys.executable), "_internal", "Purfview-Whisper-Faster")
     else:
-        # Running as script
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        alt_paths = [os.path.join(current_dir, "Purfview-Whisper-Faster")]
+        purfview_whisper_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Purfview-Whisper-Faster")
     
-    purfview_whisper_dir = None
-    for path in alt_paths:
-        logger.info(f"[DEBUG] Checking: {path}")
-        if os.path.exists(path):
-            purfview_whisper_dir = path
-            logger.info(f"[DEBUG] Found Purfview at: {path}")
-            break
+    logger.info(f"[DEBUG] Purfview path: {purfview_whisper_dir}")
     
-    if not purfview_whisper_dir:
-        logger.error(f"[ERROR] Purfview not found in any location")
+    if not os.path.exists(purfview_whisper_dir):
+        logger.error(f"[ERROR] Purfview not found at: {purfview_whisper_dir}")
         return None
     
     try:
@@ -308,6 +328,16 @@ def transcribe_audio_to_srt(audio_path, model_size="medium"):
         if not os.path.exists(whisper_exe):
             print(f"[ERROR] Whisper executable not found: {whisper_exe}")
             return None
+        
+        # Set up environment and DLL search path
+        env = os.environ.copy()
+        if getattr(sys, 'frozen', False):
+            exe_dir = os.path.dirname(sys.executable)
+            purfview_data_dir = os.path.join(purfview_whisper_dir, "_xxl_data")
+            # Prepend Purfview dirs to PATH so its DLLs are found first
+            dll_paths = [purfview_whisper_dir, purfview_data_dir, exe_dir, os.path.join(exe_dir, "_internal")]
+            env['PATH'] = os.pathsep.join(dll_paths) + os.pathsep + env.get('PATH', '')
+            logger.info(f"Purfview PATH set: {env['PATH'][:200]}...")
         
         cmd = [whisper_exe, audio_path, "--model", model_size, "--output_format", "srt", "--print_progress"]
         print(f"Running Purfview Whisper: {' '.join(cmd)}")
@@ -323,7 +353,6 @@ def transcribe_audio_to_srt(audio_path, model_size="medium"):
                             match = re.search(r'(\d+)%', line)
                             if match:
                                 whisper_progress = int(match.group(1))
-                                # Map Purfview's 0-100% to our 15-50% range
                                 mapped_progress = 15 + int((whisper_progress / 100) * 35)
                                 update_progress(f"Transcribing audio: {whisper_progress}%", mapped_progress)
                         except:
@@ -331,7 +360,7 @@ def transcribe_audio_to_srt(audio_path, model_size="medium"):
         
         creationflags = subprocess.CREATE_NO_WINDOW if platform.system() == 'Windows' and not DEBUG else 0
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
-                                 text=True, cwd=purfview_whisper_dir, 
+                                 text=True, cwd=purfview_whisper_dir, env=env,
                                  creationflags=creationflags, bufsize=1, universal_newlines=True)
         
         output_thread = threading.Thread(target=read_output, args=(process,))
@@ -359,8 +388,10 @@ def transcribe_audio_to_srt(audio_path, model_size="medium"):
                 return srt_content
         else:
             print(f"Purfview Whisper failed with return code {returncode}")
+            print(f"HINT: If you see DLL errors, run install_vcredist.bat from the installation folder")
     except Exception as e:
         print(f"Purfview Whisper failed: {e}")
+        print(f"HINT: If you see DLL errors, install Visual C++ Redistributable from the installation folder")
         import traceback
         traceback.print_exc()
     
@@ -371,7 +402,11 @@ def process_media_file(file_path):
     """Process audio or video file and return SRT content"""
     file_ext = os.path.splitext(file_path)[1].lower()
     
-    with tempfile.TemporaryDirectory() as temp_dir:
+    # Use C:\ProgramData to avoid network-mapped paths in Parallels/VMs
+    local_temp_base = os.path.join('C:\\', 'ProgramData', 'ChapterGenerator', 'temp')
+    os.makedirs(local_temp_base, exist_ok=True)
+    
+    with tempfile.TemporaryDirectory(dir=local_temp_base) as temp_dir:
         try:
             if file_ext in SUPPORTED_AUDIO_FORMATS:
                 # Direct audio transcription
@@ -412,20 +447,21 @@ def process_media_file(file_path):
 def get_ollama_models(base_url):
     try:
         # Check if this is an Osaurus server first
+        headers = {}
         try:
             test_response = requests.get(f"{base_url.rstrip('/')}/", timeout=5)
             if "Osaurus Server" in test_response.text:
-                # Use Osaurus API endpoint
+                headers["Authorization"] = f"Bearer {OSAURUS_API_KEY}"
                 url = f"{base_url.rstrip('/')}/api/tags"
             else:
-                # Use standard Ollama API endpoint
                 url = f"{base_url.rstrip('/')}/api/tags"
         except:
-            # Fallback to standard Ollama endpoint
             url = f"{base_url.rstrip('/')}/api/tags"
             
         session = requests.Session()
         session.trust_env = False  # Disable proxy
+        if headers:
+            session.headers.update(headers)
         if platform.system() != "Windows":
             session.verify = False
             import urllib3
@@ -462,7 +498,7 @@ def get_title_for_chunk(transcript_chunk, timestamp, ollama_session, custom_prom
         
         # Remove thinking tags and common prefixes
         title = re.sub(r'<think>.*?</think>', '', title, flags=re.DOTALL | re.IGNORECASE)
-        title = re.sub(r'^(Title:|Here is a title:|Chapter Title:)\s*', '', title, flags=re.IGNORECASE).strip('"\'')
+        title = re.sub(r'^(Title:|Here is a title:|Chapter Title:|Chapter TiTl:)\s*', '', title, flags=re.IGNORECASE).strip('"\'')
         title = title.strip()
         # If title is still empty or just thinking remnants, use fallback
         if not title or title.startswith('Okay,') or len(title) < 3:
@@ -500,7 +536,11 @@ def update_progress(step, progress):
     global progress_data
     progress_data = {"step": step, "progress": progress}
     logger.info(f"Progress: {step} - {progress}%")
-    sys.stdout.flush()
+    try:
+        sys.stdout.flush()
+    except OSError:
+        # Ignore stdout flush errors in executable mode
+        pass
 
 def cleanup_old_files(directory, keep_count=5):
     """Remove old uploaded and transcribed files, keeping only the most recent ones"""
@@ -1291,7 +1331,18 @@ def generate_intelligent_chapters(transcript_blocks, num_chapters, ollama_sessio
 # Initialize Flask app with lazy imports
 try:
     lazy_import_web()
-    app = Flask(__name__)
+    # Use _internal/templates so patches can update the template without rebuilding the exe
+    # Fall back to _MEIPASS if _internal/templates doesn't exist (e.g. first install)
+    if getattr(sys, 'frozen', False):
+        _internal = os.path.join(os.path.dirname(sys.executable), '_internal')
+        _template_dir = os.path.join(_internal, 'templates')
+        _static_dir = os.path.join(_internal, 'static')
+        if not os.path.isdir(_template_dir):
+            _template_dir = os.path.join(sys._MEIPASS, 'templates')
+            _static_dir = os.path.join(sys._MEIPASS, 'static')
+        app = Flask(__name__, template_folder=_template_dir, static_folder=_static_dir)
+    else:
+        app = Flask(__name__)
     
     @app.route('/')
     def index(): 
@@ -1306,26 +1357,18 @@ try:
     @app.route('/check_updates', methods=['GET'])
     def check_updates_route():
         from updater import check_for_updates
-        update_info = check_for_updates(APP_VERSION)
-        return jsonify(update_info)
-    
+        return jsonify(check_for_updates(APP_VERSION))
+
     @app.route('/download_update', methods=['POST'])
     def download_update_route():
-        from updater import download_and_run_installer
-        import time
+        import time, threading
         data = request.get_json()
         download_url = data.get('download_url')
+        new_version = data.get('new_version', '')
         if not download_url:
             return jsonify({"success": False, "error": "Download URL not provided."}), 400
-        
-        result = download_and_run_installer(download_url)
-        
-        if result.get("success"):
-            def shutdown_app():
-                time.sleep(1)
-                os._exit(0)
-            threading.Thread(target=shutdown_app).start()
-        
+        from updater import download_and_apply_update
+        result = download_and_apply_update(download_url, new_version)
         return jsonify(result)
     
     @app.route('/api/models', methods=['GET'])
@@ -1518,9 +1561,11 @@ def process_file_route():
         write_debug(f"Processing file: {file.filename}")
         write_debug(f"Chapters: {num_chapters}, Model: {model}, Endpoint: {endpoint}")
         
-        # Save to exe directory instead of temp
+        # Save to local directory (avoid network paths in Parallels/VMs)
         if getattr(sys, 'frozen', False):
-            upload_dir = os.path.dirname(sys.executable)
+            # Use C:\ProgramData to avoid network-mapped user profiles
+            upload_dir = os.path.join('C:\\', 'ProgramData', 'ChapterGenerator')
+            os.makedirs(upload_dir, exist_ok=True)
         else:
             upload_dir = os.path.dirname(__file__)
         
@@ -1555,9 +1600,11 @@ def process_file_route():
                 base_filename = os.path.splitext(os.path.basename(file.filename))[0]
                 srt_filename = f"{base_filename}_transcribed.srt"
                 
-                # Save to exe directory
+                # Save to local directory (avoid network paths)
                 if getattr(sys, 'frozen', False):
-                    srt_path = os.path.join(os.path.dirname(sys.executable), srt_filename)
+                    srt_dir = os.path.join('C:\\', 'ProgramData', 'ChapterGenerator')
+                    os.makedirs(srt_dir, exist_ok=True)
+                    srt_path = os.path.join(srt_dir, srt_filename)
                 else:
                     srt_path = os.path.join(os.path.dirname(__file__), srt_filename)
                 
@@ -1609,9 +1656,11 @@ def process_file_route():
                     base_filename = os.path.splitext(os.path.basename(file.filename))[0]
                     srt_filename = f"{base_filename}_transcribed.srt"
                     
-                    # Save to current directory
+                    # Save to local directory (avoid network paths)
                     if getattr(sys, 'frozen', False):
-                        srt_path = os.path.join(os.path.dirname(sys.executable), srt_filename)
+                        srt_dir = os.path.join('C:\\', 'ProgramData', 'ChapterGenerator')
+                        os.makedirs(srt_dir, exist_ok=True)
+                        srt_path = os.path.join(srt_dir, srt_filename)
                     else:
                         srt_path = os.path.join(os.path.dirname(__file__), srt_filename)
                     
@@ -1669,10 +1718,14 @@ def process_file_route():
             except:
                 pass
     except Exception as e:
-        print(f"[FLASK] Exception caught in /process: {e}", file=sys.stderr)
-        print(f"[FLASK] Exception type: {type(e)}", file=sys.stderr)
-        import traceback
-        print(f"[FLASK] Traceback: {traceback.format_exc()}", file=sys.stderr)
+        try:
+            print(f"[FLASK] Exception caught in /process: {e}", file=sys.stderr)
+            print(f"[FLASK] Exception type: {type(e)}", file=sys.stderr)
+            import traceback
+            print(f"[FLASK] Traceback: {traceback.format_exc()}", file=sys.stderr)
+        except OSError:
+            # Ignore stderr print errors in executable mode
+            pass
         return jsonify({"error": f"An unexpected server error occurred: {str(e)}"}), 500
 
 class API:
@@ -1689,11 +1742,17 @@ class API:
         if self._window: return {'x': self._window.x, 'y': self._window.y}
         return {'x': 0, 'y': 0}
     
-    def resize_window(self, height):
+    def resize_window(self, width, height):
         if self._window:
-            current_width = self._window.width
-            # Add a small buffer to the height to prevent scrollbars from flashing.
-            self._window.resize(current_width, int(height) + 5)
+            self._window.resize(int(width), int(height))
+
+    def restart_app(self):
+        """Launch a new instance then close this one."""
+        import subprocess
+        exe = sys.executable
+        subprocess.Popen([exe], creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+        if self._window: self._window.destroy()
+        os._exit(0)
 
 if __name__ == "__main__":
     import threading
@@ -1712,13 +1771,31 @@ if __name__ == "__main__":
             import time
             
             def run_server():
-                app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)
+                try:
+                    logger.info("Flask server starting on 127.0.0.1:5000")
+                    # Disable Flask's CLI output which causes issues in PyInstaller
+                    import click
+                    click.echo = lambda *args, **kwargs: None
+                    app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)
+                except Exception as e:
+                    logger.error(f"Flask server failed to start: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
             
             server_thread = threading.Thread(target=run_server, daemon=True)
             server_thread.start()
             
             # Wait for server to start
             time.sleep(2)
+            
+            # Verify server is running before creating window
+            import requests
+            try:
+                response = requests.get('http://127.0.0.1:5000', timeout=5)
+                logger.info("Flask server is responding")
+            except Exception as e:
+                logger.error(f"Flask server not responding: {e}")
+                # Continue anyway - pywebview might handle the connection
             
             # Create pywebview window
             api = API(None)
@@ -1733,6 +1810,7 @@ if __name__ == "__main__":
                 js_api=api,
                 resizable=True
             )
+            api._window = window
             webview.start()
         else:
             # Running as Python script - use GUI
@@ -1747,7 +1825,8 @@ if __name__ == "__main__":
                 height=900,
                 min_size=(500, 600),
                 js_api=api,
-                resizable=True
+                resizable=True,
+                icon=resource_path('icon.ico')
             )
             api._window = window
             webview.start(http_server=True, debug=DEBUG, gui='edge')
