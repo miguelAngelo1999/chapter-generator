@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Chapter Generator</title>
+    <style>
+        :root { --1-color: #ba1010; --2-color: #8c0000; --3-color: #1A374D; --4-color: #004B49; --gold-color: #ffcc00; --bg-color: #FFFFF0; --panel-width: 320px; --titlebar-height: 40px; }
+        html, body { margin: 0; padding: 0; background: var(--bg-color); overflow: hidden; font-family: sans-serif; font-size: 16px; transition: font-size 0.2s ease-in-out; }
+        body { height: 100vh; display: flex; flex-direction: column; position: relative; }
+        body::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; box-shadow: inset 0 0 200px rgba(0, 0, 0, 0.8); pointer-events: none; z-index: 999; }
+        .light { position: absolute; width: 100%; height: 100%; border-radius: 90%; background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0) 50%); pointer-events: none; mix-blend-mode: overlay; transform: translate(-50%, -50%); z-index: 1000; transition: opacity 0.3s; }
+        .titlebar { position: fixed; top: 0; left: 0; right: 0; height: var(--titlebar-height); background: linear-gradient(180deg,rgba(217, 217, 217, 1) 0%, rgba(255, 255, 240, .5) 35%, rgba(255, 255, 240, .05) 100%); color: var(--3-color); display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 18px; box-sizing: border-box; cursor: move; user-select: none; z-index: 50; }
+        .titlebar-text { font-family: 'Georgia', serif; font-size: 16px; opacity: 0.9; }
+        .window-controls { display: flex; gap: 8px; }
+        .window-btn { width: 24px; height: 24px; border: none; border-radius: 6px; background: rgba(0,0,0,0.1); color: var(--3-color); font-size: 16px; font-weight: bold; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; justify-content: center; }
+        .window-btn:hover { background: #ba1010; color: #fff; }
+        .window-btn.minimize:hover { background: #004B49; color: #fff; }
+        .main-wrapper { padding-top: 50px; padding-left: 25px; padding-right: 25px; padding-bottom: 25px; box-sizing: border-box; display: flex; flex: 1; min-height: 0; overflow: hidden; }
+        .container { text-align: center; padding: 25px; position: relative; margin: 0; border-radius: 12px; background: var(--bg-color); background-image: radial-gradient(circle at 20% 50%, rgba(186, 16, 16, 0.03) 0%, transparent 50%), radial-gradient(circle at 80% 80%, rgba(0, 75, 73, 0.03) 0%, transparent 50%); width: 100%; box-sizing: border-box; display: flex; flex-direction: column; flex: 1; }
+        .container:before { content: ""; position: absolute; inset: 0; background: var(--1-color); border-radius: 12px; --mask: radial-gradient(25px at 25px 25px,#0000 calc(98% - 4px),#000 calc(100% - 4px) 98%,#0000) -25px -25px, linear-gradient(90deg,#000 8px,#0000 0) -4px 50% / 100% calc(100% - 50px + 4px) repeat-x, linear-gradient(#000 8px,#0000 0) 50% -4px / calc(100% - 50px + 4px) 100% repeat-y; -webkit-mask: var(--mask); mask: var(--mask); }
+        .container > * { position: relative; }
+        h1 { color: var(--2-color); font-family: 'Georgia', serif; font-size: 28px; text-align: center; margin: 15px 0; font-variant: small-caps; letter-spacing: 1px; text-shadow: 0 0 20px rgba(140, 0, 0, 0.3); }
+        .input-field { display: flex; flex-direction: column; text-align: left; gap: 10px; margin: 20px 0; padding: 20px; position: relative; }
+        .input-field:before { content: ""; position: absolute; inset: 0; background: var(--3-color); --mask: radial-gradient(8px at 8px 8px,#0000 calc(98% - 2px),#000 calc(100% - 2px) 98%,#0000) -8px -8px, linear-gradient(90deg,#000 4px,#0000 0) -2px 50% / 100% calc(100% - 16px + 2px) repeat-x, linear-gradient(#000 4px,#0000 0) 50% -2px / calc(100% - 16px + 2px) 100% repeat-y; -webkit-mask: var(--mask); mask: var(--mask); }
+        label { position: relative; font-family: serif; letter-spacing: 1px; color: var(--3-color); font-weight: normal; }
+        .input-style, input[type="number"], select, textarea { position: relative; width: 100%; padding: 8px; border: 1px solid #9a0000; background-color: var(--bg-color); color: #082808; font-family: 'Garamond', serif; font-size: 16px; box-sizing: border-box; }
+        .button-container { position: relative; display: flex; padding: 5px; text-align: center; justify-content: center; align-items: center; margin: 10px auto; width: auto; max-width: 250px; box-sizing: border-box; cursor: pointer; }
+        .button-container:before { content: ""; position: absolute; inset: 0; background: var(--4-color); --mask: radial-gradient(10px at 10px 10px,#0000 calc(98% - 2px),#000 calc(100% - 2px) 98%,#0000) -10px -10px, linear-gradient(90deg,#000 4px,#0000 0) -2px 50% / 100% calc(100% - 20px + 2px) repeat-x, linear-gradient( #000 4px,#0000 0) 50% -2px / calc(100% - 20px + 2px) 100% repeat-y; -webkit-mask: var(--mask); mask: var(--mask); transition: background-color 0.2s, box-shadow 0.3s; }
+        .button-container:hover:before { background-color: var(--1-color); box-shadow: 0 0 20px rgba(186, 16, 16, 0.6), inset 0 0 15px rgba(255, 204, 0, 0.3); }
+        .button { position: relative; display: inline-block; width: auto; padding: 12px 24px; font-size: 18px; font-family: 'Georgia', serif; font-variant: small-caps; letter-spacing: 1px; color: var(--4-color); background: transparent; border: none; cursor: pointer; transition: color 0.2s, transform 0.1s, text-shadow 0.3s; }
+        .button-container:hover .button { text-shadow: 0 0 8px rgba(255, 204, 0, 0.8); }
+        .button:disabled { color: #888 !important; cursor: not-allowed; }
+        .button-container:has(.button:disabled):hover:before { background-color: var(--4-color); }
+        .file-input-container:before { background: var(--3-color); }
+        .file-input-container:hover:before { background-color: var(--1-color); box-shadow: 0 0 15px rgba(186, 16, 16, 0.5); }
+        .button.file-label { color: var(--3-color); }
+        .file-input-container:hover .button.file-label { color: var(--3-color); }
+        #advanced-panel-content .button { color: var(--gold-color); }
+        #log-area { margin-top: 15px; font-family: 'Courier New', monospace; font-size: 14px; height: 0; max-height: 90px; background-color: #0b5246; color: #ecf0f1; border: 1px solid rgba(26, 60, 46, 0.8); width: 100%; box-sizing: border-box; flex-shrink: 0; resize: vertical; padding: 0 10px; white-space: pre-wrap; word-break: break-all; overflow-y: hidden; user-select: text; transition: height 0.3s ease, padding 0.3s ease; }
+        #log-area.visible { height: 90px; padding: 10px; overflow-y: auto; }
+        .log-toggle { text-align: center; margin-top: 10px; cursor: pointer; color: var(--3-color); font-size: 12px; user-select: none; }
+        .log-toggle:hover { color: var(--1-color); }
+        .output-wrapper { position: relative; margin-top: 5px; flex: 1; display: flex; flex-direction: column; }
+        .copy-btn { position: absolute; top: 8px; right: 8px; background: rgba(0,75,73,0.8); color: var(--gold-color); border: 1px solid var(--gold-color); padding: 8px; border-radius: 4px; cursor: pointer; font-size: 20px; opacity: 0; transition: opacity 0.2s, transform 0.2s; z-index: 10; line-height: 1; }
+        .copy-btn::before { content: '⎘'; }
+        .copy-btn.download-btn::before { content: '⤓'; }
+        .output-wrapper:hover .copy-btn { opacity: 1; }
+        .copy-btn:hover { background: var(--1-color); border-color: var(--bg-color); color: var(--bg-color); transform: scale(1.05); }
+        #output-area { user-select: text; cursor: text; font-family: 'serif'; min-height: 150px; resize: vertical; background-color: rgba(232, 232, 224, 0.7); border: 1px solid #ccc; width: 100%; box-sizing: border-box; flex: 1; padding: 10px; white-space: pre-wrap; overflow-y: auto; backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); }
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 3px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: var(--gold-color); animation: spin 1s ease-in-out infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .advanced-toggle { text-align: center; margin: 15px 0; font-size: 14px; }
+        .advanced-toggle a { color: var(--2-color); cursor: pointer; text-decoration: underline; }
+        #advanced-panel { position: fixed; top: var(--titlebar-height); height: calc(100% - var(--titlebar-height)); right: 0; width: var(--panel-width); transform: translateX(100%); transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1), box-shadow 0.3s; z-index: 20; background-color: #074b60; border-radius: 10px 0 0 10px; }
+        #advanced-panel.visible { box-shadow: -5px 0 30px rgba(0, 75, 96, 0.5), inset 0 0 40px rgba(255, 204, 0, 0.1); }
+        #advanced-panel.visible { transform: translateX(0); }
+        #panel-tab { position: absolute; left: -30px; top: 50%; transform: translateY(-50%); width: 30px; height: 60px; background: #074b60; border-radius: 10px 0 0 10px; cursor: pointer; transition: transform 0.3s ease-in-out; display: flex; align-items: center; justify-content: center; box-shadow: -2px 0 5px rgba(0,0,0,0.2); }
+        #panel-tab:hover { transform: translateY(-50%) scale(1.1); }
+        #panel-tab img { width: calc(100% - 5px); height: calc(100% - 5px); }
+        #panel-tab:hover img { animation: spin-forward .5s ease-out 1; }
+        #panel-tab:active img { animation: spin-backward 1s ease-out 1; }
+        @keyframes spin-forward { from { transform: rotate(0deg); } to { transform: rotate(140deg); } }
+        @keyframes spin-backward { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+        #advanced-panel-content { width: 100%; height: 100%; box-sizing: border-box; overflow-y: auto; padding: 15px; }
+        #advanced-panel-content h3 { color: var(--gold-color); font-family: 'Georgia', serif; text-align: center; }
+        #advanced-panel-content label { color: var(--gold-color); }
+        #advanced-panel-content .input-style { color: var(--2-color); }
+        .gpu-accelerate { will-change: text-shadow, box-shadow, transform; transform: translateZ(0); }
+        h1, .button, .titlebar-text { will-change: text-shadow; transform: translateZ(0); }
+        .drop-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0, 75, 73, 0.85); z-index: 9999; display: none; align-items: center; justify-content: center; text-align: center; pointer-events: none; }
+        .drop-overlay.visible { display: flex; }
+        .drop-overlay-content { padding: 40px; border: 4px dashed var(--bg-color); border-radius: 20px; color: var(--bg-color); font-family: 'Georgia', serif; font-size: 24px; }
+        .resize-handle { position: fixed; z-index: 9998; }
+        .resize-handle.right { right: 0; top: 0; bottom: 0; width: 5px; cursor: ew-resize; }
+        .resize-handle.bottom { left: 0; right: 0; bottom: 0; height: 5px; cursor: ns-resize; }
+        .resize-handle.corner { right: 0; bottom: 0; width: 15px; height: 15px; cursor: nwse-resize; }
+        #toast { position: fixed; top: 50px; left: 50%; transform: translateX(-50%) translateY(-10px); background: #004B49; color: #ffcc00; font-family: Georgia, serif; font-size: 14px; padding: 10px 22px; border-radius: 6px; border: 1px solid #ffcc00; opacity: 0; transition: opacity 0.4s, transform 0.4s; z-index: 99999; pointer-events: none; text-align: center; max-width: 80%; }
+        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+    </style>
+</head>
+<body>
+    <div class="titlebar" id="titlebar">
+        <span class="titlebar-text">Chapter Generator</span>
+        <div class="window-controls">
+            <button class="window-btn minimize" id="minimize-btn" title="Minimize">–</button>
+            <button class="window-btn" id="close-btn" title="Close">×</button>
+        </div>
+    </div>
+    <div class="main-wrapper">
+        <div class="container">
+            <h1>Chapter Generator</h1>
+            <div class="input-field">
+                <label for="mediaFile">Media File:</label>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="text" id="vcf-path" class="input-style" readonly placeholder="Select a media file..." style="flex: 1;">
+                    <div class="button-container file-input-container" style="margin: 0;">
+                        <label for="mediaFile" class="button file-label">Browse</label>
+                        <input type="file" id="mediaFile" style="opacity: 0; position: absolute; left: 0; top: 0; width: 100%; height: 100%; cursor: pointer;" accept=".srt,.mp3,.wav,.m4a,.aac,.ogg,.flac,.wma,.mp4,.avi,.mov,.mkv,.wmv,.flv,.webm,.m4v">
+                    </div>
+                </div>
+            </div>
+            <div class="input-field">
+                <label for="num_chapters">Number of Chapters:</label>
+                <input type="number" id="num_chapters" class="input-style" value="5" min="2">
+            </div>
+
+            <div class="button-container">
+                <button id="process-btn" class="button"><span class="spinner" style="display: none;"></span> <span id="process-btn-text">Process</span></button>
+            </div>
+            <div class="button-container" style="margin-top: 5px;">
+                <button id="srt-only-btn" class="button">Generate SRT Only</button>
+            </div>
+            <div class="log-toggle" id="log-toggle">▼ Show Log</div>
+            <div id="log-area"></div>
+            <div class="output-wrapper">
+                <button class="copy-btn" id="copy-btn" title="Copy chapters"></button>
+                <button class="copy-btn download-btn" id="download-srt-btn" title="Download SRT" style="right: 50px; display: none;"></button>
+                <button class="copy-btn" id="generate-chapters-btn" title="Generate chapters from SRT" style="right: 92px; display: none; font-size: 18px;">≡</button>
+                <div id="output-area">Output will appear here...</div>
+            </div>
+            <div style="color: #ccc; text-align: right; padding: 10px; font-size:12px; font-family:serif;">© TinyCat</div>
+        </div>
+        <div id="advanced-panel">
+            <div id="panel-tab"><img src="static/wheel.svg" alt="Settings"></div>
+            <div id="advanced-panel-content">
+                <h3 style="text-align: center;">Settings</h3>
+                <div class="input-field">
+                    <label>Ollama Model:</label>
+                    <select id="model-select" class="input-style"></select>
+                </div>
+                <div class="input-field">
+                    <label>Ollama Endpoint:</label>
+                    <input type="text" id="ollama-endpoint" class="input-style" value="http://localhost:11434">
+                </div>
+                <div class="button-container">
+                    <button id="refresh-models-btn" class="button">Refresh Models</button>
+                </div>
+                <div class="button-container">
+                    <button id="check-updates-btn" class="button">Check for Updates</button>
+                </div>
+                <div class="button-container">
+                    <button id="toggle-light-btn" class="button">Disable Light Effect</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="drop-overlay" class="drop-overlay"><div class="drop-overlay-content">Drop media file here</div></div>
+    <div id="toast"></div>
+    <div id="update-banner" style="display:none; position:fixed; bottom:0; left:0; right:0; background:linear-gradient(135deg,#074b60,#004B49); border-top:2px solid #ffcc00; padding:14px 24px; z-index:99998; align-items:center; justify-content:space-between; font-family:Georgia,serif; color:#ffcc00; font-size:15px; box-shadow:0 -4px 20px rgba(0,0,0,0.4);">
+        <span id="update-banner-msg" style="font-variant:small-caps; letter-spacing:1px;"></span>
+        <div id="update-banner-btns" style="display:flex; gap:10px; flex-shrink:0;">
+            <button id="update-install-btn" style="background:#ffcc00; color:#004B49; border:none; padding:7px 18px; font-family:Georgia,serif; font-size:14px; font-variant:small-caps; letter-spacing:1px; cursor:pointer; border-radius:4px; font-weight:bold;">Install Now</button>
+            <button id="update-dismiss-btn" style="background:transparent; color:#ffcc00; border:1px solid rgba(255,204,0,0.5); padding:7px 14px; font-family:Georgia,serif; font-size:13px; font-variant:small-caps; cursor:pointer; border-radius:4px;">Later</button>
+        </div>
+    </div>
+    <div class="light" id="light"></div>
+    <div class="resize-handle right"></div>
+    <div class="resize-handle bottom"></div>
+    <div class="resize-handle corner"></div>
+    <script>
+        let state = { isLoading: false, models: [], selectedModel: '', numChapters: 5, mediaFile: null, ollamaEndpoint: '{{ ENDPOINT }}', output: 'Output will appear here...', showAdvanced: false, logMessages: [], showLog: false, srtDownloadUrl: null, srtFilename: null, lightEnabled: true };
+        
+        function render() {
+            document.getElementById('num_chapters').value = state.numChapters;
+            document.getElementById('ollama-endpoint').value = state.ollamaEndpoint;
+            document.getElementById('vcf-path').value = state.mediaFile ? state.mediaFile.name : '';
+            document.getElementById('output-area').textContent = state.output;
+            document.getElementById('process-btn').disabled = state.isLoading || !state.mediaFile;
+            document.getElementById('srt-only-btn').disabled = state.isLoading || !state.mediaFile;
+            document.getElementById('advanced-panel').classList.toggle('visible', state.showAdvanced);
+            
+            const downloadSrtBtn = document.getElementById('download-srt-btn');
+            const generateChaptersBtn = document.getElementById('generate-chapters-btn');
+            if (state.srtDownloadUrl) {
+                downloadSrtBtn.style.display = 'block';
+                generateChaptersBtn.style.display = 'block';
+            } else {
+                downloadSrtBtn.style.display = 'none';
+                generateChaptersBtn.style.display = 'none';
+            }
+            
+            const spinner = document.querySelector('.spinner');
+            const btnText = document.getElementById('process-btn-text');
+            if (state.isLoading) {
+                spinner.style.display = 'inline-block';
+                btnText.textContent = 'Processing';
+            } else {
+                spinner.style.display = 'none';
+                btnText.textContent = 'Process';
+            }
+            
+            const logArea = document.getElementById('log-area');
+            const logToggle = document.getElementById('log-toggle');
+            if (state.logMessages.length > 0 && state.showLog) {
+                logArea.classList.add('visible');
+                logArea.textContent = state.logMessages.join('\n');
+                logArea.scrollTop = logArea.scrollHeight;
+                logToggle.textContent = '▲ Hide Log';
+            } else {
+                logArea.classList.remove('visible');
+                logToggle.textContent = '▼ Show Log';
+            }
+            
+            if (state.logMessages.length > 0) {
+                logToggle.style.display = 'block';
+            } else {
+                logToggle.style.display = 'none';
+            }
+            
+            const modelSelect = document.getElementById('model-select');
+            modelSelect.innerHTML = state.models.length === 0 ? '<option>Loading...</option>' : state.models.map(m => `<option value="${m}" ${m === state.selectedModel ? 'selected' : ''}>${m}</option>`).join('');
+        }
+        
+        function showToast(msg, duration=4000) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), duration);
+        }
+
+        function setState(newState) { state = { ...state, ...newState }; render(); }
+        
+        async function fetchModels() {
+            const endpoint = document.getElementById('ollama-endpoint').value;
+            try {
+                const response = await fetch(`/api/models?endpoint=${encodeURIComponent(endpoint)}`);
+                const models = await response.json();
+                const preferredModel = models.find(m => m.includes('llama3.2') && m.includes('8b')) || models[0] || '';
+                setState({ models, selectedModel: preferredModel });
+            } catch (e) {
+                setState({ models: [], selectedModel: '', output: `Error: ${e.message}` });
+            }
+        }
+        
+        async function processFile(srtOnly = false) {
+            if (!state.mediaFile) return;
+            
+            // Only check for model if not SRT-only mode
+            if (!srtOnly && !state.selectedModel) {
+                setState({ output: 'Error: No model selected. Please select a model from settings.' });
+                return;
+            }
+            
+            setState({ isLoading: true, output: 'Starting processing...', logMessages: ['Starting processing...'] });
+            
+            const progressInterval = setInterval(async () => {
+                try {
+                    const progressResponse = await fetch('/progress');
+                    const progressData = await progressResponse.json();
+                    const logMsg = `${progressData.step} (${progressData.progress}%)`;
+                    // Only update if message changed and not at 100%
+                    if (progressData.progress < 100 && state.logMessages[state.logMessages.length - 1] !== logMsg) {
+                        setState({ output: logMsg, logMessages: [...state.logMessages, logMsg] });
+                    }
+                } catch (e) {}
+            }, 1000);
+            
+            try {
+                const formData = new FormData();
+                formData.append('file', state.mediaFile);
+                formData.append('num_chapters', state.numChapters);
+                formData.append('model', state.selectedModel);
+                formData.append('ollama_endpoint', state.ollamaEndpoint);
+                if (srtOnly) formData.append('srt_only', 'true');
+                
+                const response = await fetch('/process', { method: 'POST', body: formData });
+                clearInterval(progressInterval);
+                const result = await response.json();
+                
+                console.log('Response status:', response.ok);
+                console.log('Result:', result);
+                console.log('Has chapters:', !!result.chapters);
+                console.log('Has srt_filename:', !!result.srt_filename);
+                
+                if (response.ok) {
+                    let outputText;
+                    if (result.chapters) {
+                        outputText = result.chapters.join('\n');
+                        const textarea = document.createElement('textarea');
+                        textarea.innerHTML = outputText;
+                        outputText = textarea.value;
+                        setState({ isLoading: false, output: outputText, logMessages: [...state.logMessages, 'Processing complete!'], srtDownloadUrl: result.srt_download_url, srtFilename: result.srt_filename });
+                    } else if (result.srt_filename) {
+                        outputText = `SRT file generated successfully`;
+                        const textarea = document.createElement('textarea');
+                        textarea.innerHTML = outputText;
+                        outputText = textarea.value;
+                        setState({ isLoading: false, output: outputText, logMessages: [...state.logMessages, 'SRT generation complete!'], srtDownloadUrl: result.srt_download_url, srtFilename: result.srt_filename });
+                    } else {
+                        outputText = JSON.stringify(result);
+                        setState({ isLoading: false, output: outputText, logMessages: [...state.logMessages, 'Processing complete!'] });
+                    }
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+            } catch (error) {
+                clearInterval(progressInterval);
+                setState({ isLoading: false, output: `Error: ${error.message}`, logMessages: [...state.logMessages, `Error: ${error.message}`] });
+            }
+        }
+        
+        document.getElementById('mediaFile').addEventListener('change', e => setState({ mediaFile: e.target.files[0] }));
+        document.getElementById('num_chapters').addEventListener('change', e => setState({ numChapters: e.target.value }));
+        document.getElementById('process-btn').addEventListener('click', () => processFile(false));
+        document.getElementById('srt-only-btn').addEventListener('click', () => processFile(true));
+        document.getElementById('panel-tab').addEventListener('click', (e) => { e.stopPropagation(); setState({ showAdvanced: !state.showAdvanced }); });
+        document.getElementById('advanced-panel').addEventListener('click', (e) => e.stopPropagation());
+        document.addEventListener('click', () => { if (state.showAdvanced) setState({ showAdvanced: false }); });
+        document.getElementById('copy-btn').addEventListener('click', () => {
+            const output = document.getElementById('output-area').textContent;
+            navigator.clipboard.writeText(output).then(() => {
+                const btn = document.getElementById('copy-btn');
+                btn.style.transform = 'scale(1.2)';
+                setTimeout(() => btn.style.transform = 'scale(1)', 200);
+            });
+        });
+        document.getElementById('download-srt-btn').addEventListener('click', async () => {
+            if (state.srtDownloadUrl) {
+                try {
+                    const response = await fetch(state.srtDownloadUrl);
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = state.srtFilename || 'transcription.srt';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                } catch (error) {
+                    console.error('Download failed:', error);
+                }
+            }
+        });
+        document.getElementById('generate-chapters-btn').addEventListener('click', async () => {
+            if (!state.srtFilename || !state.selectedModel) {
+                setState({ output: 'Error: No SRT file or model selected' });
+                return;
+            }
+            setState({ isLoading: true, output: 'Generating chapters from SRT...', logMessages: ['Generating chapters from SRT...'] });
+            try {
+                const formData = new FormData();
+                formData.append('srt_path', state.srtFilename.replace('_transcribed.srt', ''));
+                formData.append('num_chapters', state.numChapters);
+                formData.append('model', state.selectedModel);
+                formData.append('ollama_endpoint', state.ollamaEndpoint);
+                const response = await fetch('/retry_chapters', { method: 'POST', body: formData });
+                const result = await response.json();
+                if (response.ok) {
+                    const outputText = result.chapters.join('\n');
+                    setState({ isLoading: false, output: outputText, logMessages: [...state.logMessages, 'Chapters generated!'] });
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+            } catch (error) {
+                setState({ isLoading: false, output: `Error: ${error.message}`, logMessages: [...state.logMessages, `Error: ${error.message}`] });
+            }
+        });
+        document.getElementById('log-toggle').addEventListener('click', () => setState({ showLog: !state.showLog }));
+        document.getElementById('model-select').addEventListener('change', e => setState({ selectedModel: e.target.value }));
+        document.getElementById('ollama-endpoint').addEventListener('change', e => setState({ ollamaEndpoint: e.target.value }));
+        document.getElementById('refresh-models-btn').addEventListener('click', fetchModels);
+        document.getElementById('toggle-light-btn').addEventListener('click', () => {
+            setState({ lightEnabled: !state.lightEnabled });
+            document.getElementById('toggle-light-btn').textContent = state.lightEnabled ? 'Disable Light Effect' : 'Enable Light Effect';
+        });
+        let pendingUpdate = null;
+
+        document.getElementById('update-install-btn').addEventListener('click', async () => {
+            if (!pendingUpdate) return;
+            document.getElementById('update-banner').style.display = 'none';
+            document.getElementById('check-updates-btn').textContent = 'Downloading...';
+            document.getElementById('check-updates-btn').disabled = true;
+            const dlResponse = await fetch('/download_update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ download_url: pendingUpdate.download_url, new_version: pendingUpdate.latest_version })
+            });
+            const dlResult = await dlResponse.json();
+            if (dlResult.success) {
+                document.getElementById('update-banner').style.display = 'none';
+                // Show success toast with Restart Now button
+                const t = document.getElementById('toast');
+                t.innerHTML = `✓ UI updated to v${pendingUpdate.latest_version}! <button onclick="window.pywebview.api.restart_app()" style="margin-left:12px; background:#ffcc00; color:#004B49; border:none; padding:4px 12px; font-family:Georgia,serif; font-variant:small-caps; cursor:pointer; border-radius:3px; font-size:13px;">Reload</button>`;
+                t.classList.add('show');
+                setTimeout(() => { t.classList.remove('show'); location.reload(); }, 5000);
+            } else {
+                showToast('Update failed: ' + dlResult.error, 5000);
+            }
+            document.getElementById('check-updates-btn').textContent = 'Check for Updates';
+            document.getElementById('check-updates-btn').disabled = false;
+            pendingUpdate = null;
+        });
+
+        document.getElementById('update-dismiss-btn').addEventListener('click', () => {
+            document.getElementById('update-banner').style.display = 'none';
+            pendingUpdate = null;
+        });
+
+        document.getElementById('check-updates-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('check-updates-btn');
+            btn.textContent = 'Checking...';
+            btn.disabled = true;
+            try {
+                const response = await fetch('/check_updates');
+                const result = await response.json();
+                if (result.update_available) {
+                    pendingUpdate = result;
+                    document.getElementById('update-banner-msg').textContent = `Update available: v${result.latest_version}`;
+                    document.getElementById('update-banner').style.display = 'flex';
+                } else {
+                    showToast(result.message || result.error || 'You are on the latest version.');
+                }
+            } catch (error) {
+                showToast('Error: ' + error.message, 5000);
+            } finally {
+                btn.textContent = 'Check for Updates';
+                btn.disabled = false;
+            }
+        });
+        document.getElementById('close-btn').addEventListener('click', () => window.pywebview.api.closeWindow());
+        document.getElementById('minimize-btn').addEventListener('click', () => window.pywebview.api.minimizeWindow());
+        
+        let currentLightX = window.innerWidth / 2;
+        let currentLightY = window.innerHeight / 2;
+        let targetLightX = currentLightX;
+        let targetLightY = currentLightY;
+        let lastUpdateTime = 0;
+        const updateInterval = 16;
+        
+        document.addEventListener('mousemove', (e) => {
+            if (state.lightEnabled) {
+                targetLightX = e.clientX;
+                targetLightY = e.clientY;
+            }
+        });
+        
+        function updateLight(timestamp) {
+            if (timestamp - lastUpdateTime < updateInterval) {
+                requestAnimationFrame(updateLight);
+                return;
+            }
+            lastUpdateTime = timestamp;
+            
+            const light = document.getElementById('light');
+            if (state.lightEnabled) {
+                const lerp = 0.1;
+                currentLightX += (targetLightX - currentLightX) * lerp;
+                currentLightY += (targetLightY - currentLightY) * lerp;
+                light.style.opacity = '1';
+            } else {
+                light.style.opacity = '0';
+            }
+            
+            light.style.left = currentLightX + 'px';
+            light.style.top = currentLightY + 'px';
+            
+            requestAnimationFrame(updateLight);
+        }
+        
+        requestAnimationFrame(updateLight);
+        
+        document.getElementById('titlebar').addEventListener('mousedown', (e) => {
+            if (e.button !== 0 || e.target.closest('.window-controls')) return;
+            e.preventDefault();
+            const dragOffsetX = e.screenX - window.screenX;
+            const dragOffsetY = e.screenY - window.screenY;
+            const onMouseMove = (ev) => window.pywebview.api.set_window_position(ev.screenX - dragOffsetX, ev.screenY - dragOffsetY);
+            const onMouseUp = () => { document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp); };
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+        
+        window.addEventListener('dragover', (e) => { e.preventDefault(); document.getElementById('drop-overlay').classList.add('visible'); });
+        window.addEventListener('dragleave', (e) => { if (e.relatedTarget === null) document.getElementById('drop-overlay').classList.remove('visible'); });
+        window.addEventListener('drop', (e) => {
+            e.preventDefault();
+            document.getElementById('drop-overlay').classList.remove('visible');
+            if (e.dataTransfer.files.length > 0) setState({ mediaFile: e.dataTransfer.files[0] });
+        });
+        
+        window.addEventListener('load', () => { render(); fetchModels(); checkForUpdates(); });
+        
+        async function checkForUpdates() {
+            try {
+                const response = await fetch('/check_updates');
+                const result = await response.json();
+                if (result.update_available) {
+                    pendingUpdate = result;
+                    document.getElementById('update-banner-msg').textContent = `Update available: v${result.latest_version}`;
+                    document.getElementById('update-banner').style.display = 'flex';
+                }
+            } catch (error) {
+                console.log('Auto-update check failed:', error);
+            }
+        }
+        
+        // Resize handles
+        document.querySelectorAll('.resize-handle').forEach(handle => {
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                const startX = e.screenX;
+                const startY = e.screenY;
+                const startWidth = window.outerWidth;
+                const startHeight = window.outerHeight;
+                const isRight = handle.classList.contains('right') || handle.classList.contains('corner');
+                const isBottom = handle.classList.contains('bottom') || handle.classList.contains('corner');
+                
+                const onMouseMove = (ev) => {
+                    const deltaX = ev.screenX - startX;
+                    const deltaY = ev.screenY - startY;
+                    const newWidth = isRight ? startWidth + deltaX : startWidth;
+                    const newHeight = isBottom ? startHeight + deltaY : startHeight;
+                    window.pywebview.api.resize_window(Math.max(500, newWidth), Math.max(600, newHeight));
+                };
+                
+                const onMouseUp = () => {
+                    document.removeEventListener('mousemove', onMouseMove);
+                    document.removeEventListener('mouseup', onMouseUp);
+                };
+                
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            });
+        });
+    </script>
+</body>
+</html>
