@@ -55,17 +55,46 @@ def main():
                 return
         write_log("Parent process PID has disappeared.")
 
-        wait_duration = 10
+        wait_duration = 5
         write_log(f"Now performing a simple, fixed wait of {wait_duration} seconds for all file locks to clear...")
         time.sleep(wait_duration)
         write_log("Wait finished. Proceeding to launch installer.")
 
         if os.path.exists(installer_path):
+            installer_size = os.path.getsize(installer_path)
+            write_log(f"Installer exists. Size: {installer_size} bytes.")
             try:
-                subprocess.Popen([installer_path, f"-p{INSTALLER_PASSWORD}"], creationflags=subprocess.DETACHED_PROCESS)
-                write_log("SUCCESS: Installer launched.")
+                proc = subprocess.Popen([installer_path, f"-p{INSTALLER_PASSWORD}", "-s"])
+                write_log(f"Installer launched with -s flag. PID: {proc.pid}. Waiting to finish...")
+                proc.wait(timeout=300)
+                write_log(f"Installer process exited with code {proc.returncode}.")
+
+                # Wait for any WinRAR child extraction processes to finish
+                deadline = time.time() + 60
+                while time.time() < deadline:
+                    children = [p for p in psutil.process_iter(['name'])
+                                if p.info['name'] and 'winrar' in p.info['name'].lower()]
+                    if not children:
+                        break
+                    write_log(f"Still waiting for WinRAR: {[p.info['name'] for p in children]}")
+                    time.sleep(1)
+                write_log("Extraction complete.")
+
+                # Launch the updated app
+                app_exe = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Chapter Generator', 'ChapterGenerator.exe')
+                if not os.path.exists(app_exe):
+                    # Fallback: Program Files
+                    app_exe = r'C:\Program Files\Chapter Generator\ChapterGenerator.exe'
+                if os.path.exists(app_exe):
+                    exe_mtime = os.path.getmtime(app_exe)
+                    write_log(f"Launching app: {app_exe} (mtime={time.ctime(exe_mtime)})")
+                    subprocess.Popen([app_exe], creationflags=subprocess.DETACHED_PROCESS)
+                else:
+                    write_log(f"App exe not found at: {app_exe}")
+            except subprocess.TimeoutExpired:
+                write_log("FATAL ERROR: Installer timed out after 300 seconds.")
             except Exception as e:
-                write_log(f"FATAL ERROR: Launching installer failed: {e}")
+                write_log(f"FATAL ERROR: {e}")
         else:
             write_log(f"FATAL ERROR: Installer not found at '{installer_path}'.")
 
