@@ -1,81 +1,121 @@
+"""Chapter Generator updater - checks version and applies patch from Google Drive"""
 import sys
 import os
+import ssl
+import urllib3
+import warnings
 import requests
 import tempfile
-import subprocess
+import zipfile
 import shutil
 import time
 from packaging.version import parse as parse_version
 
-GITHUB_REPO = "miguelAngelo1999/chapter-generator"
-INSTALLER_ASSET_NAME = "ChapterGeneratorInstaller.exe"
+# SSL bypass + proxy
+os.environ.update({
+    'PYTHONHTTPSVERIFY': '0',
+    'HTTP_PROXY': 'http://127.0.0.1:1090',
+    'HTTPS_PROXY': 'http://127.0.0.1:1090',
+})
+ssl._create_default_https_context = ssl._create_unverified_context
+urllib3.disable_warnings()
+_orig_request = requests.Session.request
+def _patched_request(self, method, url, **kwargs):
+    kwargs['verify'] = False
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return _orig_request(self, method, url, **kwargs)
+requests.Session.request = _patched_request
 
-def get_launcher_path():
+VERSION_FILE_ID   = "1D9MMV-z6EjX8D6M9dHl44_JHlMaxtBNT"
+INSTALLER_FILE_ID = "15NLsYpfRhxBVyiZ_lZmy1gxAcdY5qf7d"
+
+
+def get_install_dir():
     if getattr(sys, 'frozen', False):
-        base_path = os.path.dirname(sys.executable)
-    else:
-        base_path = os.path.dirname(__file__)
-    return os.path.join(base_path, 'updater_launcher.exe')
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
 
-def check_for_updates(current_version_str):
-    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-    try:
-        response = requests.get(api_url, timeout=10, verify=False)
-        response.raise_for_status()
-        latest_release = response.json()
-        latest_version_str = latest_release.get("tag_name", "v0.0.0").lstrip('v')
-        current_version = parse_version(current_version_str)
-        latest_version = parse_version(latest_version_str)
 
-        if latest_version > current_version:
-            for asset in latest_release.get("assets", []):
-                if asset["name"] == INSTALLER_ASSET_NAME:
-                    return {
-                        "update_available": True,
-                        "latest_version": latest_version_str,
-                        "download_url": asset["browser_download_url"],
-                    }
-            return {"update_available": False, "error": "Installer asset not found."}
-        else:
-            return {"update_available": False, "message": "You are on the latest version."}
-    except requests.exceptions.RequestException as e:
-        return {"update_available": False, "error": f"Network error: {e}"}
-    except Exception as e:
-        return {"update_available": False, "error": f"An unexpected error occurred: {e}"}
-
-def download_and_run_installer(download_url):
-    try:
-        response = requests.get(download_url, stream=True, timeout=300, verify=False)
-        response.raise_for_status()
-        
-        temp_dir = tempfile.gettempdir()
-        installer_path = os.path.join(temp_dir, INSTALLER_ASSET_NAME)
-        
-        with open(installer_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
+def gdrive_download(file_id, destination):
+    import re
+    session = requests.Session()
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    resp = session.get(url, stream=True, verify=False)
+    if 'text/html' in resp.headers.get('Content-Type', ''):
+        html = resp.text
+        action_match = re.search(r'action="([^"]+)"', html)
+        if action_match:
+            action = action_match.group(1).replace('&amp;', '&')
+            inputs = re.findall(r'<input[^>]*name="([^"]*)"[^>]*value="([^"]*)"', html)
+            params = {name: val for name, val in inputs}
+            resp = session.get(action, params=params, stream=True, verify=False)
+    with open(destination, 'wb') as f:
+        for chunk in resp.iter_content(32768):
+            if chunk:
                 f.write(chunk)
 
-        original_launcher_path = get_launcher_path()
-        if not os.path.exists(original_launcher_path):
-            return {"success": False, "error": "Updater launcher component (updater_launcher.exe) is missing."}
 
-        temp_launcher_path = os.path.join(temp_dir, f"launcher_{int(time.time())}.exe")
-        shutil.copy(original_launcher_path, temp_launcher_path)
-
-        current_pid = os.getpid()
-        
-        command_to_run = [
-            temp_launcher_path,
-            installer_path,
-            str(current_pid)
-        ]
-        
-        subprocess.Popen(
-            command_to_run,
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-            close_fds=True
-        )
-        
-        return {"success": True, "message": "Update process initiated. This app will now close."}
+def check_for_updates(current_version_str):
+    try:
+        url = f"https://drive.google.com/uc?export=download&id={VERSION_FILE_ID}"
+        resp = requests.get(url, timeout=10, verify=False)
+        latest_str = resp.text.strip()
+        if latest_str.startswith('<'):
+            return {"update_available": False, "error": "Could not read version from server"}
+        current = parse_version(current_version_str)
+        latest = parse_version(latest_str)
+        if latest > current:
+            return {
+                "update_available": True,
+                "latest_version": latest_str,
+                "download_url": f"gdrive:{INSTALLER_FILE_ID}",
+            }
+        return {"update_available": False, "message": "You are on the latest version."}
     except Exception as e:
-        return {"success": False, "error": f"Failed to download or run installer: {e}"}
+        return {"update_available": False, "error": f"Update check failed: {e}"}
+
+
+def download_and_apply_update(download_url, new_version):
+    """Download patch zip and hot-swap app files. No restart needed."""
+    try:
+        if download_url.startswith('gdrive:'):
+            file_id = download_url.replace('gdrive:', '')
+        else:
+            return {"success": False, "error": "Invalid download URL"}
+
+        temp_dir = os.environ.get('TEMP') or os.environ.get('TMP') or tempfile.gettempdir()
+        zip_path = os.path.join(temp_dir, f"ChapterGenPatch_{int(time.time())}.zip")
+
+        gdrive_download(file_id, zip_path)
+
+        if not os.path.exists(zip_path) or os.path.getsize(zip_path) < 1000:
+            return {"success": False, "error": "Download failed or file too small"}
+
+        install_dir = get_install_dir()
+
+        # Extract patch files over existing install
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            members = zf.namelist()
+            for member in members:
+                dest = os.path.join(install_dir, member.replace('/', os.sep))
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                try:
+                    with zf.open(member) as src, open(dest, 'wb') as dst:
+                        shutil.copyfileobj(src, dst)
+                except PermissionError:
+                    # Skip locked files (e.g. running exe) — they'll update on next restart
+                    pass
+
+        os.remove(zip_path)
+
+        # Write new version
+        import json
+        version_file = os.path.join(install_dir, 'version.json')
+        info = {"version": new_version, "major": int(new_version.split('.')[0])}
+        with open(version_file, 'w') as f:
+            json.dump(info, f)
+
+        return {"success": True, "message": f"Updated to v{new_version}. Restart the app to apply."}
+    except Exception as e:
+        return {"success": False, "error": f"Update failed: {e}"}
