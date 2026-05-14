@@ -141,6 +141,7 @@
                 <div class="button-container">
                     <button id="toggle-light-btn" class="button">Disable Light Effect</button>
                 </div>
+                <div style="text-align:center; margin-top:20px; color:rgba(255,204,0,0.5); font-family:Georgia,serif; font-size:12px; font-variant:small-caps; letter-spacing:1px;" id="version-display">v...</div>
             </div>
         </div>
     </div>
@@ -378,6 +379,7 @@
             });
             const dlResult = await dlResponse.json();
             if (dlResult.success) {
+                localStorage.setItem('lastUpdatedVersion', pendingUpdate.latest_version);
                 document.getElementById('update-banner').style.display = 'none';
                 // Show success toast with Restart Now button
                 const t = document.getElementById('toast');
@@ -405,9 +407,17 @@
                 const response = await fetch('/check_updates');
                 const result = await response.json();
                 if (result.update_available) {
-                    pendingUpdate = result;
-                    document.getElementById('update-banner-msg').textContent = `Update available: v${result.latest_version}`;
-                    document.getElementById('update-banner').style.display = 'flex';
+                    if (localStorage.getItem('lastUpdatedVersion') === result.latest_version) {
+                        // Already downloaded — just show reload toast
+                        const t = document.getElementById('toast');
+                        t.innerHTML = `v${result.latest_version} installed. <button onclick="window.pywebview.api.restart_app()" style="margin-left:12px;background:#ffcc00;color:#004B49;border:none;padding:4px 12px;font-family:Georgia,serif;font-variant:small-caps;cursor:pointer;border-radius:3px;font-size:13px;">Reload</button>`;
+                        t.classList.add('show');
+                        setTimeout(() => { t.classList.remove('show'); location.reload(); }, 5000);
+                    } else {
+                        pendingUpdate = result;
+                        document.getElementById('update-banner-msg').textContent = `Update available: v${result.latest_version}`;
+                        document.getElementById('update-banner').style.display = 'flex';
+                    }
                 } else {
                     showToast(result.message || result.error || 'You are on the latest version.');
                 }
@@ -479,13 +489,31 @@
             if (e.dataTransfer.files.length > 0) setState({ mediaFile: e.dataTransfer.files[0] });
         });
         
-        window.addEventListener('load', () => { render(); fetchModels(); checkForUpdates(); });
+        window.addEventListener('load', () => {
+            render();
+            fetchModels();
+            checkForUpdates();
+            // Fetch and display version
+            fetch('/check_updates').then(r => r.json()).then(data => {
+                // Get current version from server
+                fetch('/api/version').then(r => r.json()).then(v => {
+                    document.getElementById('version-display').textContent = 'v' + v.version;
+                    // Show welcome toast if version changed since last visit
+                    const lastSeen = localStorage.getItem('lastSeenVersion');
+                    if (lastSeen && lastSeen !== v.version) {
+                        showToast('\u2713 Welcome to version ' + v.version + '!', 5000);
+                    }
+                    localStorage.setItem('lastSeenVersion', v.version);
+                }).catch(() => {});
+            }).catch(() => {});
+        });
         
         async function checkForUpdates() {
             try {
                 const response = await fetch('/check_updates');
                 const result = await response.json();
                 if (result.update_available) {
+                    if (localStorage.getItem('lastUpdatedVersion') === result.latest_version) return;
                     pendingUpdate = result;
                     document.getElementById('update-banner-msg').textContent = `Update available: v${result.latest_version}`;
                     document.getElementById('update-banner').style.display = 'flex';
