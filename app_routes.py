@@ -57,6 +57,64 @@ def register_routes(app, state):
     def api_version():
         return jsonify({'version': state['APP_VERSION']})
 
+    @app.route('/download_models', methods=['POST'])
+    def download_models_route():
+        """Download and install Whisper models from Google Drive."""
+        import threading, zipfile, shutil
+        MODELS_FILE_ID = '1TPfJYD2yAK3bZxZYj92BJcr4Ni1qkk1I'
+
+        def do_download():
+            try:
+                import requests as req, re, tempfile
+                session = req.Session()
+                url = f'https://drive.google.com/uc?export=download&id={MODELS_FILE_ID}'
+                resp = session.get(url, stream=True, verify=False)
+                if 'text/html' in resp.headers.get('Content-Type',''):
+                    html = resp.text
+                    action = re.search(r'action="([^"]+)"', html)
+                    if action:
+                        action_url = action.group(1).replace('&amp;','&')
+                        inputs = re.findall(r'<input[^>]*name="([^"]*)"[^>]*value="([^"]*)"', html)
+                        resp = session.get(action_url, params=dict(inputs), stream=True, verify=False)
+                tmp = os.path.join(os.environ.get('TEMP', tempfile.gettempdir()), 'whisper_models.zip')
+                with open(tmp, 'wb') as f:
+                    for chunk in resp.iter_content(65536):
+                        if chunk: f.write(chunk)
+                # Extract to Purfview dir — zip contains _models/faster-whisper-medium/...
+                if getattr(sys, 'frozen', False):
+                    purfview = os.path.join(os.path.dirname(sys.executable), '_internal', 'Purfview-Whisper-Faster')
+                else:
+                    purfview = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Purfview-Whisper-Faster')
+                os.makedirs(purfview, exist_ok=True)
+                with zipfile.ZipFile(tmp, 'r') as zf:
+                    zf.extractall(purfview)
+                os.remove(tmp)
+            except Exception as e:
+                print(f'Model download failed: {e}')
+
+        # Check if models already exist
+        if getattr(sys, 'frozen', False):
+            purfview = os.path.join(os.path.dirname(sys.executable), '_internal', 'Purfview-Whisper-Faster')
+        else:
+            purfview = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Purfview-Whisper-Faster')
+        models_dir = os.path.join(purfview, '_models')
+        has_models = os.path.isdir(models_dir) and any(os.scandir(models_dir))
+        if has_models:
+            return jsonify({'success': False, 'error': 'Models already installed.'})
+
+        threading.Thread(target=do_download, daemon=True).start()
+        return jsonify({'success': True, 'message': 'Downloading models (~1.4GB). This may take a few minutes...'})
+
+    @app.route('/models_status')
+    def models_status():
+        if getattr(sys, 'frozen', False):
+            purfview = os.path.join(os.path.dirname(sys.executable), '_internal', 'Purfview-Whisper-Faster')
+        else:
+            purfview = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Purfview-Whisper-Faster')
+        models_dir = os.path.join(purfview, '_models')
+        has_models = os.path.isdir(models_dir) and any(os.scandir(models_dir))
+        return jsonify({'installed': has_models})
+
     @app.route('/api/models', methods=['GET'])
     def api_get_models():
         endpoint = request.args.get('endpoint', DEFAULT_OLLAMA_BASE_URL)
