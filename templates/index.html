@@ -138,6 +138,9 @@
                 <div class="button-container">
                     <button id="check-updates-btn" class="button">Check for Updates</button>
                 </div>
+                <div class="button-container" id="download-models-container" style="display:none">
+                    <button id="download-models-btn" class="button">Download Whisper Models</button>
+                </div>
                 <div class="button-container">
                     <button id="toggle-light-btn" class="button">Disable Light Effect</button>
                 </div>
@@ -361,6 +364,45 @@
         document.getElementById('model-select').addEventListener('change', e => setState({ selectedModel: e.target.value }));
         document.getElementById('ollama-endpoint').addEventListener('change', e => setState({ ollamaEndpoint: e.target.value }));
         document.getElementById('refresh-models-btn').addEventListener('click', fetchModels);
+        document.getElementById('download-models-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('download-models-btn');
+            btn.textContent = 'Downloading...';
+            btn.disabled = true;
+            try {
+                const r = await fetch('/download_models', {method:'POST'});
+                const result = await r.json();
+                if (result.success) {
+                    showToast(result.message, 8000);
+                    btn.textContent = 'Downloading Models...';
+                    // Poll until models are installed
+                    const poll = setInterval(async () => {
+                        const s = await fetch('/models_status').then(r=>r.json());
+                        if (s.installed) {
+                            clearInterval(poll);
+                            document.getElementById('download-models-container').style.display = 'none';
+                            showToast('\u2713 Whisper models installed! Ready to transcribe.', 5000);
+                        }
+                    }, 5000);
+                } else {
+                    showToast(result.error, 4000);
+                    document.getElementById('download-models-container').style.display = 'none';
+                    btn.textContent = 'Download Whisper Models';
+                    btn.disabled = false;
+                }
+            } catch(e) {
+                showToast('Download failed: ' + e.message, 4000);
+                btn.textContent = 'Download Whisper Models';
+                btn.disabled = false;
+            }
+        });
+
+        // Check models status on load
+        fetch('/models_status').then(r=>r.json()).then(s=>{
+            if (!s.installed) {
+                document.getElementById('download-models-container').style.display = 'flex';
+            }
+        }).catch(()=>{});
+
         document.getElementById('toggle-light-btn').addEventListener('click', () => {
             setState({ lightEnabled: !state.lightEnabled });
             document.getElementById('toggle-light-btn').textContent = state.lightEnabled ? 'Disable Light Effect' : 'Enable Light Effect';
