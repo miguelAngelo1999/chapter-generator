@@ -53,6 +53,10 @@ def register_routes(app, state):
         result = download_and_apply_update(download_url, new_version)
         return jsonify(result)
 
+    @app.route('/api/version')
+    def api_version():
+        return jsonify({'version': state['APP_VERSION']})
+
     @app.route('/api/models', methods=['GET'])
     def api_get_models():
         endpoint = request.args.get('endpoint', DEFAULT_OLLAMA_BASE_URL)
