@@ -118,7 +118,7 @@ def _read_installed_version():
             return json.loads(open(vf).read()).get('version', '1.1.2')
     except Exception:
         pass
-    return '1.1.3'
+    return '1.1.8'
 
 APP_VERSION = _read_installed_version()
 DEBUG = '--debug' in sys.argv 
@@ -1343,148 +1343,42 @@ try:
         app = Flask(__name__, template_folder=_template_dir, static_folder=_static_dir)
     else:
         app = Flask(__name__)
-    
-    @app.route('/')
-    def index(): 
-        html = load_html_template()
-        # Inject default endpoint into HTML
-        html = html.replace('{{ ENDPOINT }}', DEFAULT_OLLAMA_BASE_URL)
-        return html
-    
-    @app.route('/progress')
-    def get_progress(): return jsonify(progress_data)
-    
-    @app.route('/check_updates', methods=['GET'])
-    def check_updates_route():
-        from updater import check_for_updates
-        return jsonify(check_for_updates(APP_VERSION))
 
-    @app.route('/download_update', methods=['POST'])
-    def download_update_route():
-        import time, threading
-        data = request.get_json()
-        download_url = data.get('download_url')
-        new_version = data.get('new_version', '')
-        if not download_url:
-            return jsonify({"success": False, "error": "Download URL not provided."}), 400
-        from updater import download_and_apply_update
-        result = download_and_apply_update(download_url, new_version)
-        return jsonify(result)
-    
-    @app.route('/api/models', methods=['GET'])
-    def api_get_models(): 
-        endpoint = request.args.get('endpoint', DEFAULT_OLLAMA_BASE_URL)
-        if not endpoint:
-            endpoint = DEFAULT_OLLAMA_BASE_URL
-        print(f"Fetching models from: {endpoint}")
-        models = get_ollama_models(endpoint)
-        print(f"Found models: {models}")
-        return jsonify(models)
-    
-    @app.route('/save_srt_local/<filename>')
-    def save_srt_local(filename):
-        """Save SRT file directly to application directory"""
-        try:
-            import datetime
-            
-            # Get the current directory (works in both script and exe mode)
-            if getattr(sys, 'frozen', False):
-                # Running in PyInstaller bundle
-                search_dir = os.path.dirname(sys.executable)
-            else:
-                # Running in normal Python
-                search_dir = os.path.dirname(__file__)
-            
-            # Look for the exact transcribed SRT file
-            expected_filename = f"{filename}_transcribed.srt"
-            srt_path = os.path.join(search_dir, expected_filename)
-            
-            write_debug(f"Looking for SRT file to save locally: {srt_path}")
-            
-            if os.path.exists(srt_path):
-                # Create a timestamped copy in application directory
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                local_filename = f"{filename}_transcribed_{timestamp}.srt"
-                local_path = os.path.join(search_dir, local_filename)
-                
-                # Copy file
-                import shutil
-                shutil.copy2(srt_path, local_path)
-                
-                write_debug(f"SRT file saved locally: {local_path}")
-                
-                return jsonify({
-                    "success": True,
-                    "message": f"SRT file saved locally as: {local_filename}",
-                    "local_path": local_path
-                })
-            else:
-                # Fallback to glob search
-                srt_pattern = os.path.join(search_dir, f'*{filename}*.srt')
-                srt_files = glob.glob(srt_pattern)
-                write_debug(f"Fallback search pattern: {srt_pattern}")
-                
-                if srt_files:
-                    srt_path = srt_files[0]
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    local_filename = f"{filename}_transcribed_{timestamp}.srt"
-                    local_path = os.path.join(search_dir, local_filename)
-                    
-                    import shutil
-                    shutil.copy2(srt_path, local_path)
-                    
-                    write_debug(f"SRT file saved locally: {local_path}")
-                    
-                    return jsonify({
-                        "success": True,
-                        "message": f"SRT file saved locally as: {local_filename}",
-                        "local_path": local_path
-                    })
-                else:
-                    write_debug(f"SRT file not found for: {filename}")
-                    return jsonify({"error": "SRT file not found"}), 404
-                    
-        except Exception as e:
-            write_debug(f"Error saving SRT locally: {e}")
-            return jsonify({"error": "Failed to save SRT file locally"}), 500
-    
-    @app.route('/download_srt/<filename>')
-    def download_srt(filename):
-        try:
-            # Look for SRT file in current directory first
-            if getattr(sys, 'frozen', False):
-                # Running in PyInstaller bundle
-                search_dir = os.path.dirname(sys.executable)
-            else:
-                # Running in normal Python
-                search_dir = os.path.dirname(__file__)
-            
-            # Look for the exact transcribed SRT file
-            expected_filename = f"{filename}_transcribed.srt"
-            srt_path = os.path.join(search_dir, expected_filename)
-            
-            write_debug(f"Looking for SRT file: {srt_path}")
-            
-            if os.path.exists(srt_path):
-                write_debug(f"Found SRT file: {srt_path}")
-                return send_file(srt_path, as_attachment=True, download_name=expected_filename)
-            else:
-                # Fallback to glob search
-                srt_pattern = os.path.join(search_dir, f'*{filename}*.srt')
-                srt_files = glob.glob(srt_pattern)
-                write_debug(f"Fallback search pattern: {srt_pattern}")
-                write_debug(f"Found SRT files: {srt_files}")
-                
-                if srt_files:
-                    srt_path = srt_files[0]
-                    write_debug(f"Downloading SRT: {srt_path}")
-                    return send_file(srt_path, as_attachment=True, download_name=os.path.basename(srt_path))
-                else:
-                    write_debug(f"SRT file not found for: {filename}")
-                    return jsonify({"error": "SRT file not found"}), 404
-        except Exception as e:
-            write_debug(f"Error downloading SRT: {e}")
-            return jsonify({"error": "Failed to download SRT file"}), 500
+    # Load routes from app_routes.py dynamically so patches update backend logic
+    def _load_routes():
+        import importlib.util, importlib
+        # Look for app_routes.py in _internal first (patchable), then fall back to _MEIPASS
+        if getattr(sys, 'frozen', False):
+            routes_path = os.path.join(os.path.dirname(sys.executable), '_internal', 'app_routes.py')
+            if not os.path.exists(routes_path):
+                routes_path = os.path.join(sys._MEIPASS, 'app_routes.py')
+        else:
+            routes_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app_routes.py')
+
+        if os.path.exists(routes_path):
+            spec = importlib.util.spec_from_file_location('app_routes', routes_path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.register_routes(app, {
+                'request': request, 'jsonify': jsonify, 'send_file': send_file,
+                'progress_data': progress_data,
+                'process_srt': process_srt,
+                'process_media_file': process_media_file,
+                'get_ollama_models': get_ollama_models,
+                'cleanup_old_files': cleanup_old_files,
+                'update_progress': update_progress,
+                'write_debug': write_debug,
+                'APP_VERSION': APP_VERSION,
+                'DEFAULT_OLLAMA_BASE_URL': DEFAULT_OLLAMA_BASE_URL,
+                'SUPPORTED_AUDIO_FORMATS': SUPPORTED_AUDIO_FORMATS,
+                'SUPPORTED_VIDEO_FORMATS': SUPPORTED_VIDEO_FORMATS,
+            })
+            logger.info(f'Routes loaded from: {routes_path}')
+        else:
+            logger.error(f'app_routes.py not found at: {routes_path}')
+            raise FileNotFoundError(f'app_routes.py not found')
+
+    _load_routes()
 
 except Exception as e:
     # Critical Flask startup error
@@ -1498,235 +1392,6 @@ except Exception as e:
     except:
         pass
     sys.exit(1)
-
-@app.route('/retry_chapters', methods=['POST'])
-def retry_chapters_route():
-    """Regenerate chapters from existing SRT without re-transcribing"""
-    try:
-        srt_path_base = request.form.get('srt_path')
-        num_chapters = int(request.form.get('num_chapters', 10))
-        model = request.form.get('model')
-        endpoint = request.form.get('ollama_endpoint', DEFAULT_OLLAMA_BASE_URL)
-        custom_prompt = request.form.get('custom_prompt')
-        
-        if not srt_path_base or not model:
-            return jsonify({"error": "Missing required parameters"}), 400
-        
-        # Find the SRT file
-        if getattr(sys, 'frozen', False):
-            search_dir = os.path.dirname(sys.executable)
-        else:
-            search_dir = os.path.dirname(__file__)
-        
-        srt_filename = f"{srt_path_base}_transcribed.srt"
-        srt_path = os.path.join(search_dir, srt_filename)
-        
-        if not os.path.exists(srt_path):
-            return jsonify({"error": "SRT file not found. Please re-transcribe the media file."}), 404
-        
-        update_progress("Processing SRT file", 50)
-        results = process_srt(srt_path, num_chapters, model, endpoint, custom_prompt)
-        
-        if not results:
-            return jsonify({"error": "Failed to generate chapters"}), 500
-        
-        output = [f"{timestamp} {title}" for timestamp, title in results]
-        return jsonify({"chapters": output})
-        
-    except Exception as e:
-        print(f"[FLASK] Retry chapters error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/process', methods=['POST'])
-def process_file_route():
-    write_debug("=== FLASK PROCESS ROUTE START ===")
-    try:
-        if 'file' not in request.files: 
-            write_debug("ERROR: No file part in request")
-            return jsonify({"error": "No file part"}), 400
-        file = request.files['file']
-        if file.filename == '': 
-            write_debug("ERROR: No selected file")
-            return jsonify({"error": "No selected file"}), 400
-        num_chapters = int(request.form.get('num_chapters', 10))
-        model = request.form.get('model')
-        endpoint = request.form.get('ollama_endpoint', DEFAULT_OLLAMA_BASE_URL)
-        custom_prompt = request.form.get('custom_prompt')
-        if not model: 
-            write_debug("ERROR: No model selected")
-            return jsonify({"error": "No model selected"}), 400
-        
-        write_debug(f"Processing file: {file.filename}")
-        write_debug(f"Chapters: {num_chapters}, Model: {model}, Endpoint: {endpoint}")
-        
-        # Save to local directory (avoid network paths in Parallels/VMs)
-        if getattr(sys, 'frozen', False):
-            # Use C:\ProgramData to avoid network-mapped user profiles
-            upload_dir = os.path.join('C:\\', 'ProgramData', 'ChapterGenerator')
-            os.makedirs(upload_dir, exist_ok=True)
-        else:
-            upload_dir = os.path.dirname(__file__)
-        
-        # Clean old files (keep only last 5 processed files)
-        cleanup_old_files(upload_dir)
-        
-        upload_path = os.path.join(upload_dir, file.filename)
-        file.save(upload_path)
-        write_debug(f"File saved to: {upload_path}")
-        
-        try:
-            # Check if SRT-only processing requested
-            srt_only = request.form.get('srt_only') == 'true'
-            write_debug(f"SRT-only mode: {srt_only}")
-            
-            # Check file type and process accordingly
-            file_ext = os.path.splitext(file.filename)[1].lower()
-            write_debug(f"File extension: {file_ext}")
-            
-            update_progress("Starting processing", 0)
-            
-            if srt_only and (file_ext in SUPPORTED_AUDIO_FORMATS or file_ext in SUPPORTED_VIDEO_FORMATS):
-                # SRT-only transcription for video/audio files
-                update_progress("Extracting audio from video", 5)
-                srt_content = process_media_file(upload_path)
-                if srt_content is None:
-                    return jsonify({"error": "Failed to transcribe media file. All whisper backends failed. Please check your network connection and try again."}), 500
-                
-                update_progress("Transcription complete", 100)
-                
-                # Save transcribed SRT to permanent file for download
-                base_filename = os.path.splitext(os.path.basename(file.filename))[0]
-                srt_filename = f"{base_filename}_transcribed.srt"
-                
-                # Save to local directory (avoid network paths)
-                if getattr(sys, 'frozen', False):
-                    srt_dir = os.path.join('C:\\', 'ProgramData', 'ChapterGenerator')
-                    os.makedirs(srt_dir, exist_ok=True)
-                    srt_path = os.path.join(srt_dir, srt_filename)
-                else:
-                    srt_path = os.path.join(os.path.dirname(__file__), srt_filename)
-                
-                with open(srt_path, 'w', encoding='utf-8') as f:
-                    f.write(srt_content)
-                
-                print(f"[FLASK] SRT-only transcription completed: {srt_filename}")
-                response = jsonify({
-                    "srt_download_url": f"/download_srt/{base_filename}",
-                    "srt_filename": srt_filename
-                })
-                print(f"[FLASK] SRT-only response created: {response}")
-                return response
-            
-            if (file_ext == '.srt'):
-                # Process SRT file directly
-                update_progress("Processing SRT file", 50)
-                results = process_srt(upload_path, num_chapters, model, endpoint, custom_prompt)
-                print(f"[FLASK] process_srt returned {len(results)} results")
-                
-                if not results:
-                    return jsonify({"error": "Failed to generate chapters"}), 500
-                
-                # Create output BEFORE setting progress to 100%
-                output = [f"{timestamp} {title}" for timestamp, title in results]
-                print(f"[FLASK] Returning {len(output)} chapters for SRT file")
-                
-                # Set progress to 100 AFTER creating output
-                update_progress("Processing complete", 100)
-                
-                return jsonify({"chapters": output})
-            elif file_ext in SUPPORTED_AUDIO_FORMATS or file_ext in SUPPORTED_VIDEO_FORMATS:
-                # SIMPLIFIED: Use existing SRT-only pipeline first, then SRT-to-chapters pipeline
-                try:
-                    write_debug(f"Step 1: Transcribing {file.filename} to SRT")
-                    print(f"[FLASK] Step 1: Transcribing {file.filename} to SRT")
-                    
-                    # Step 1: Use existing SRT-only transcription pipeline
-                    update_progress("Extracting audio from video", 5)
-                    srt_content = process_media_file(upload_path)
-                    if srt_content is None:
-                        write_debug("ERROR: Transcription failed")
-                        return jsonify({"error": "Failed to transcribe media file. All whisper backends failed. Please upload an SRT file instead, or check your network connection and try again."}), 500
-                    
-                    update_progress("Transcription complete", 50)
-                    write_debug(f"Step 1 complete: SRT content length: {len(srt_content)}")
-                    
-                    # Step 2: Save SRT file (reuse SRT-only logic)
-                    base_filename = os.path.splitext(os.path.basename(file.filename))[0]
-                    srt_filename = f"{base_filename}_transcribed.srt"
-                    
-                    # Save to local directory (avoid network paths)
-                    if getattr(sys, 'frozen', False):
-                        srt_dir = os.path.join('C:\\', 'ProgramData', 'ChapterGenerator')
-                        os.makedirs(srt_dir, exist_ok=True)
-                        srt_path = os.path.join(srt_dir, srt_filename)
-                    else:
-                        srt_path = os.path.join(os.path.dirname(__file__), srt_filename)
-                    
-                    write_debug(f"Step 2: Saving SRT to: {srt_path}")
-                    with open(srt_path, 'w', encoding='utf-8') as f:
-                        f.write(srt_content)
-                    
-                    write_debug(f"Step 2 complete: SRT saved, size: {os.path.getsize(srt_path)} bytes")
-                    
-                    # Step 3: Use existing SRT-to-chapters pipeline
-                    write_debug(f"Step 3: Converting SRT to chapters")
-                    print(f"[FLASK] Step 3: Converting SRT to chapters")
-                    update_progress("Generating chapters from SRT", 75)
-                    
-                    results = process_srt(srt_path, num_chapters, model, endpoint, custom_prompt)
-                    write_debug(f"Step 3 complete: process_srt returned {len(results)} results")
-                    print(f"[FLASK] Step 3 complete: {len(results)} chapters generated")
-                    
-                    if not results:
-                        write_debug("ERROR: No chapters generated from SRT")
-                        return jsonify({"error": "Failed to generate chapters from transcribed content"}), 500
-                    
-                    # Step 4: Return combined response
-                    output = [f"{timestamp} {title}" for timestamp, title in results]
-                    
-                    write_debug(f"Step 4 complete: Returning {len(output)} chapters + SRT download")
-                    print(f"[FLASK] SUCCESS: {len(output)} chapters generated")
-                    print(f"[FLASK] About to return response with chapters={len(output)}, srt_download_url={f'/download_srt/{base_filename}'}")
-                    
-                    # CRITICAL: Set progress to 100 AFTER creating output
-                    update_progress("Processing complete", 100)
-                    
-                    # Return immediately - don't wait for finally block
-                    response_data = {
-                        "chapters": output,
-                        "srt_download_url": f"/download_srt/{base_filename}",
-                        "srt_filename": srt_filename
-                    }
-                    write_debug(f"Returning response: chapters count={len(output)}, has srt_download_url={bool(response_data.get('srt_download_url'))}")
-                    print(f"[FLASK] Response data keys: {list(response_data.keys())}")
-                    return jsonify(response_data)
-                    
-                except Exception as media_error:
-                    write_debug(f"ERROR in media processing: {media_error}")
-                    print(f"[FLASK] ERROR in media processing: {media_error}")
-                    import traceback
-                    traceback.print_exc()
-                    return jsonify({"error": f"Failed to process media file: {str(media_error)}"}), 500
-            else:
-                return jsonify({"error": "Unsupported file format"}), 400
-        finally:
-            # Clean up uploaded file
-            try:
-                os.unlink(upload_path)
-            except:
-                pass
-    except Exception as e:
-        try:
-            print(f"[FLASK] Exception caught in /process: {e}", file=sys.stderr)
-            print(f"[FLASK] Exception type: {type(e)}", file=sys.stderr)
-            import traceback
-            print(f"[FLASK] Traceback: {traceback.format_exc()}", file=sys.stderr)
-        except OSError:
-            # Ignore stderr print errors in executable mode
-            pass
-        return jsonify({"error": f"An unexpected server error occurred: {str(e)}"}), 500
 
 class API:
     def __init__(self, window):
